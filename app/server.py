@@ -5,6 +5,27 @@ from langchain_openai import ChatOpenAI
 from langserve import add_routes
 from fastapi.middleware.cors import CORSMiddleware
 
+# import os
+# OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+# LANGCHAIN_API_KEY = os.environ.get("LANGCHAIN_API_KEY")
+# os.environ["LANGCHAIN_TRACING_V2"] = "true"
+# SEC_API_KEY = os.environ.get("SEC_API_KEY")
+
+# print(OPENAI_API_KEY)
+# print(LANGCHAIN_API_KEY)
+# print(SEC_API_KEY)
+
+import html2text
+import json 
+from sec_api import QueryApi, RenderApi
+from langchain import hub
+from langchain_chroma import Chroma
+from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents.base import Document
+from langchain_openai import ChatOpenAI
+
+
 app = FastAPI(
     title="LangChain Server",
     version="1.0",
@@ -21,11 +42,11 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-add_routes(
-    app,
-    ChatOpenAI(),
-    path="/openai",
-)
+# add_routes(
+#     app,
+#     ChatOpenAI(),
+#     path="/openai",
+# )
 
 model = ChatOpenAI()
 prompt = ChatPromptTemplate.from_template("tell me a joke about {topic}")
