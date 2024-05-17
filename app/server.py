@@ -36,6 +36,15 @@ app.add_middleware(
 
 
 def create_vectorstore_for_company(stock_symbol):
+    """
+    Uses the SEC's Query API to get the link to the given company's latest 10k. Uses the SEC's Download API to download that 10k. Saves that 10k as a vectorstore.
+
+    Parameters:
+        stock_symbol (str): the ticker symbol of a company, upto 4 characters
+
+    Returns:
+        vectorstore (obj): a vectorstore of the company's 10k
+    """
     queryApi = QueryApi(api_key=SEC_API_KEY)
     query = {
         "query": "ticker:{} AND formType:\"10-K\"".format(stock_symbol),
@@ -45,29 +54,47 @@ def create_vectorstore_for_company(stock_symbol):
     }
     response = queryApi.get_filings(query)
     link_to_10k = response["filings"][0]["linkToFilingDetails"]
+
     renderApi = RenderApi(api_key=SEC_API_KEY)
     target_10k = renderApi.get_filing(link_to_10k)
+
+    # remove the html tags from the downloaded 10k so that it's more readable. also to reduce the number of tokens.
     target_10k_full_text = html2text.html2text(target_10k)
     docs = [Document(page_content=target_10k_full_text)]
+    # split the cleaned 10k into snippets of 1000 characters each. each snippet becomes a "document" in the vectorstore, and is compared to the query during the retrieval step.
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000, chunk_overlap=200, add_start_index=True
     )
     all_splits = text_splitter.split_documents(docs)
+    # create a vectorstore and store it
     vectorstore = Chroma.from_documents(documents=all_splits, embedding=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY), persist_directory="./chroma_{}".format(stock_symbol))
     return vectorstore
 
 
 def get_retriever(stock_symbol):
+    """
+    Checks if a vecstorstore has already been created for a given stock symbol. If yes, it loads and returns the retriever for that. If no, it creates one.
+    
+    Parameters:
+        stock_symbol (str): the ticker symbol of a company, upto 4 characters
+    Returns:
+        retriever (obj): retriever object for that company's vectorstore, to be used in the RAG chain
+    """
     vectorstore_filename = "chroma_{}".format(stock_symbol)
+    # If a vectorstore has already been created, load it. If no, create one
     if vectorstore_filename in os.listdir("./"):
         vectorstore = Chroma(persist_directory=vectorstore_filename, embedding_function=OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY))
     else:
         vectorstore = create_vectorstore_for_company(stock_symbol)
+    # set the retriever to return the 3 most similar snippets to the query
     retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
     return retriever
 
 
 def format_docs(docs):
+    """
+    Formats the most relevant documents to a query for use in an LLM prompt.
+    """
     return "\n\n".join(doc.page_content for doc in docs)
 
 
@@ -82,23 +109,35 @@ retriever = None
 
 
 @app.post("/load_10k")
-def read_item(stock_symbol: str):
-    stock_symbol = stock_symbol.upper()
-    global retriever
-    retriever = get_retriever(stock_symbol)
-    return "Loaded 10k for {}".format(stock_symbol)
+def load_10k(stock_symbol: str):
+    """
+    Set the 10k/vectorstore/retriever to be used for querying.
+    """
+    try:
+        stock_symbol = stock_symbol.upper()
+        global retriever
+        retriever = get_retriever(stock_symbol)
+        return "Loaded 10k for {}".format(stock_symbol)
+    except:
+        return "Unable to load 10k for {}".format(stock_symbol)
 
 
 @app.post("/query_10k")
-def read_item(query: str):
-    rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
-    )
-    response = rag_chain.invoke(query)
-    return response
+def query_10k(query: str):
+    """
+    Takes a question about the loaded 10k, and runs RAG to get the answer.
+    """
+    try:
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        response = rag_chain.invoke(query)
+        return response
+    except:
+        return "Unable to query 10k"
 
 
 if __name__ == "__main__":
