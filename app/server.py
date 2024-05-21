@@ -53,6 +53,9 @@ def create_vectorstore_for_company(stock_symbol):
         "sort": [{ "filedAt": { "order": "desc" } }]
     }
     response = queryApi.get_filings(query)
+    if len(response['filings']) == 0:
+        raise ValueError("Stock symbol: {} does not exist".format(stock_symbol))
+ 
     link_to_10k = response["filings"][0]["linkToFilingDetails"]
 
     renderApi = RenderApi(api_key=SEC_API_KEY)
@@ -118,6 +121,8 @@ def load_10k(stock_symbol: str):
         global retriever
         retriever = get_retriever(stock_symbol)
         return "Loaded 10k for {}".format(stock_symbol)
+    except ValueError as err:
+        return "Unable to load 10k for {0}: {1}".format(stock_symbol, err)
     except:
         return "Unable to load 10k for {}".format(stock_symbol)
 
